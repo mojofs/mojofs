@@ -19,3 +19,11 @@ exclude = []
 [[tool.uv.index]]
 url = "https://repo.huaweicloud.com/repository/pypi/simple"
 default = true
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+mojofs = { path = ".", editable = true }
+
+[tool.pixi.tasks]
