@@ -1,0 +1,13 @@
+AUDIT_WEBHOOK_SUB_SYS = "audit_webhook"
+AUDIT_STORE_EXTENSION = ".audit"
+
+WEBHOOK_ENDPOINT = "endpoint"
+WEBHOOK_AUTH_TOKEN = "auth_token"
+WEBHOOK_CLIENT_CERT = "client_cert"
+WEBHOOK_CLIENT_KEY = "client_key"
+WEBHOOK_BATCH_SIZE = "batch_size"
+WEBHOOK_QUEUE_SIZE = "queue_size"
+WEBHOOK_QUEUE_DIR = "queue_dir"
+WEBHOOK_MAX_RETRY = "max_retry"
+WEBHOOK_RETRY_INTERVAL = "retry_interval"
+WEBHOOK_HTTP_TIMEOUT = "http_timeout"

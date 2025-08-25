@@ -1,3 +1,10 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# 禁止提交
+data/*
+demo/*
+*.egg-info
+dist
+*.pyc
