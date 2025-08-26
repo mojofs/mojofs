@@ -16,3 +16,25 @@ def add_module_to_path():
     pth_file_path = os.path.join(site_packages_path, "python.pth")
     with open(pth_file_path, "w", encoding="utf-8") as f:
         f.write(project_root)
+
+# 导出常用模块内容（如有__all__可自动导出，否则需手动指定）
+from .certs import *
+from .ip import *
+from .net import *
+from .retry import *
+from .io import *
+from .hash import *
+from .os import *
+from .path import *
+from .string_utils import *
+from .crypto import *
+from .compress import *
+from .dirs import *
+from .sys import *
+
+# notify模块为可选模块，若存在则导入
+try:
+    from . import notify
+    from .notify import *
+except ImportError:
+    pass
