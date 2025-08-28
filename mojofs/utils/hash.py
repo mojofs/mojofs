@@ -22,7 +22,7 @@ class HashAlgorithm(Enum):
     HighwayHash256S = "highwayhash256s"
     BLAKE2b512 = "blake2b512"
     Md5 = "md5"
-    NoneType = "none"
+    NONE = "none"
 
     def hash_encode(self, data: bytes):
         if self == HashAlgorithm.Md5:
@@ -40,7 +40,7 @@ class HashAlgorithm(Enum):
                 return highwayhash.highwayhash_256(HIGHWAY_HASH256_KEY, data)
             else:
                 raise NotImplementedError("需要安装highwayhash库以支持HighwayHash256")
-        elif self == HashAlgorithm.NoneType:
+        elif self == HashAlgorithm.NONE:
             return b''
         else:
             raise ValueError("未知的Hash算法")
@@ -50,7 +50,7 @@ class HashAlgorithm(Enum):
             return 16
         elif self in (HashAlgorithm.SHA256, HashAlgorithm.HighwayHash256, HashAlgorithm.HighwayHash256S, HashAlgorithm.BLAKE2b512):
             return 32
-        elif self == HashAlgorithm.NoneType:
+        elif self == HashAlgorithm.NONE:
             return 0
         else:
             raise ValueError("未知的Hash算法")
@@ -87,11 +87,11 @@ class TestHashAlgorithm(unittest.TestCase):
         self.assertEqual(HashAlgorithm.HighwayHash256S.size(), 32)
         self.assertEqual(HashAlgorithm.SHA256.size(), 32)
         self.assertEqual(HashAlgorithm.BLAKE2b512.size(), 32)
-        self.assertEqual(HashAlgorithm.NoneType.size(), 0)
+        self.assertEqual(HashAlgorithm.NONE.size(), 0)
 
     def test_hash_encode_none(self):
         data = b"test data"
-        hashv = HashAlgorithm.NoneType.hash_encode(data)
+        hashv = HashAlgorithm.NONE.hash_encode(data)
         self.assertEqual(len(hashv), 0)
 
     def test_hash_encode_md5(self):

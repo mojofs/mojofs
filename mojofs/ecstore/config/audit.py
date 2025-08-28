@@ -1,0 +1,25 @@
+from mojofs.config import (
+    WEBHOOK_AUTH_TOKEN, WEBHOOK_BATCH_SIZE, WEBHOOK_CLIENT_CERT, WEBHOOK_CLIENT_KEY, WEBHOOK_ENDPOINT, WEBHOOK_HTTP_TIMEOUT,
+    WEBHOOK_MAX_RETRY, WEBHOOK_QUEUE_DIR, WEBHOOK_QUEUE_SIZE, WEBHOOK_RETRY_INTERVAL,
+    DEFAULT_DIR, DEFAULT_LIMIT, ENABLE_KEY, EnableState
+)
+from mojofs.ecstore.config import KV,KVS
+
+class EnableState:
+    Off = "off"
+    On = "on"
+
+# 默认的审计Webhook KVS配置
+DEFAULT_AUDIT_WEBHOOK_KVS = KVS([
+    KV(ENABLE_KEY, EnableState.Off, False),
+    KV(WEBHOOK_ENDPOINT, "", False),
+    KV(WEBHOOK_AUTH_TOKEN, "", False),
+    KV(WEBHOOK_CLIENT_CERT, "", False),
+    KV(WEBHOOK_CLIENT_KEY, "", False),
+    KV(WEBHOOK_BATCH_SIZE, "1", False),
+    KV(WEBHOOK_QUEUE_SIZE, str(DEFAULT_LIMIT), False),
+    KV(WEBHOOK_QUEUE_DIR, DEFAULT_DIR, False),
+    KV(WEBHOOK_MAX_RETRY, "0", False),
+    KV(WEBHOOK_RETRY_INTERVAL, "3s", False),
+    KV(WEBHOOK_HTTP_TIMEOUT, "5s", False),
+])

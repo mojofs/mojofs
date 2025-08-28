@@ -1,0 +1,35 @@
+from mojofs.config import (
+    MQTT_BROKER, MQTT_KEEP_ALIVE_INTERVAL, MQTT_PASSWORD, MQTT_QOS, MQTT_QUEUE_DIR, MQTT_QUEUE_LIMIT, MQTT_RECONNECT_INTERVAL,
+    MQTT_TOPIC, MQTT_USERNAME, WEBHOOK_AUTH_TOKEN, WEBHOOK_CLIENT_CERT, WEBHOOK_CLIENT_KEY, WEBHOOK_ENDPOINT, WEBHOOK_QUEUE_DIR,
+    WEBHOOK_QUEUE_LIMIT, COMMENT_KEY, DEFAULT_DIR, DEFAULT_LIMIT, ENABLE_KEY, EnableState
+)
+from mojofs.ecstore.config import KV,KVS
+
+# 默认的Webhook配置集合
+DEFAULT_WEBHOOK_KVS = KVS([
+    KV(ENABLE_KEY, EnableState.Off, False),
+    KV(WEBHOOK_ENDPOINT, "", False),
+    # 敏感信息如认证token在值为空时隐藏，提升安全性
+    KV(WEBHOOK_AUTH_TOKEN, "", True),
+    KV(WEBHOOK_QUEUE_LIMIT, str(DEFAULT_LIMIT), False),
+    KV(WEBHOOK_QUEUE_DIR, DEFAULT_DIR, False),
+    KV(WEBHOOK_CLIENT_CERT, "", False),
+    KV(WEBHOOK_CLIENT_KEY, "", False),
+    KV(COMMENT_KEY, "", False),
+])
+
+# 默认的MQTT配置集合
+DEFAULT_MQTT_KVS = KVS([
+    KV(ENABLE_KEY, EnableState.Off, False),
+    KV(MQTT_BROKER, "", False),
+    KV(MQTT_TOPIC, "", False),
+    # 敏感信息如密码在值为空时隐藏
+    KV(MQTT_PASSWORD, "", True),
+    KV(MQTT_USERNAME, "", False),
+    KV(MQTT_QOS, "0", False),
+    KV(MQTT_KEEP_ALIVE_INTERVAL, "0s", False),
+    KV(MQTT_RECONNECT_INTERVAL, "0s", False),
+    KV(MQTT_QUEUE_DIR, DEFAULT_DIR, False),
+    KV(MQTT_QUEUE_LIMIT, str(DEFAULT_LIMIT), False),
+    KV(COMMENT_KEY, "", False),
+])
