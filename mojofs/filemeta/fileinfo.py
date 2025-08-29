@@ -3,6 +3,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Union
+import json
 
 ERASURE_ALGORITHM = "rs-vandermonde"
 BLOCK_SIZE_V2 = 1024 * 1024  # 1M
@@ -15,6 +16,35 @@ TIER_FV_ID = "tier-free-versionID"
 TIER_FV_MARKER = "tier-free-marker"
 TIER_SKIP_FV_ID = "tier-skip-fvid"
 
+# 工具函数：dict <-> bytes (json+utf-8)
+def dict_to_bytes(d: dict) -> bytes:
+    return json.dumps(d, default=_json_default).encode('utf-8')
+
+def bytes_to_dict(b: bytes) -> dict:
+    return json.loads(b.decode('utf-8'))
+
+def _json_default(obj):
+    # 支持 uuid, datetime, bytes
+    import uuid, datetime, base64
+    if isinstance(obj, uuid.UUID):
+        return {'__uuid__': str(obj)}
+    if isinstance(obj, datetime.datetime):
+        return {'__datetime__': obj.isoformat()}
+    if isinstance(obj, bytes):
+        return {'__bytes__': base64.b64encode(obj).decode('ascii')}
+    if hasattr(obj, 'to_dict'):
+        return obj.to_dict()
+    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
+def _json_object_hook(d):
+    import uuid, datetime, base64
+    if '__uuid__' in d:
+        return uuid.UUID(d['__uuid__'])
+    if '__datetime__' in d:
+        return datetime.datetime.fromisoformat(d['__datetime__'])
+    if '__bytes__' in d:
+        return base64.b64decode(d['__bytes__'])
+    return d
 
 @dataclass
 class ObjectPartInfo:
@@ -28,14 +58,12 @@ class ObjectPartInfo:
     error: Optional[str] = None
 
     def marshal_msg(self) -> bytes:
-        # Simplified serialization, replace with actual msgpack if needed
-        return str(self).encode('utf-8')
+        return dict_to_bytes(self.__dict__)
 
     @staticmethod
     def unmarshal(buf: bytes) -> "ObjectPartInfo":
-        # Simplified deserialization, replace with actual msgpack if needed
-        # This is a placeholder, you'll need to implement proper deserialization
-        return eval(buf.decode('utf-8'))
+        d = bytes_to_dict(buf)
+        return ObjectPartInfo(**d)
 
 
 @dataclass
@@ -193,14 +221,12 @@ class FileInfo:
         return self.erasure.data_blocks
 
     def marshal_msg(self) -> bytes:
-        # Simplified serialization, replace with actual msgpack if needed
-        return str(self).encode('utf-8')
+        return dict_to_bytes(self.__dict__)
 
     @staticmethod
     def unmarshal(buf: bytes) -> "FileInfo":
-        # Simplified deserialization, replace with actual msgpack if needed
-        # This is a placeholder, you'll need to implement proper deserialization
-        return eval(buf.decode('utf-8'))
+        d = bytes_to_dict(buf)
+        return FileInfo(**d)
 
     def add_object_part(
         self,

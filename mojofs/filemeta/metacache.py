@@ -6,6 +6,8 @@ import time
 import threading
 from mojofs.filemeta.error import Error
 from mojofs.filemeta import FileInfo, FileInfoVersions, FileMeta, FileMetaShallowVersion, VersionType, merge_file_meta_versions
+import json
+from mojofs.filemeta.filemeta import dict_to_bytes, bytes_to_dict
 
 SLASH_SEPARATOR = "/"
 
@@ -26,9 +28,8 @@ class MetaCacheEntry:
     reusable: bool = False
 
     def marshal_msg(self) -> bytes:
-        # 使用msgpack序列化
-        import msgpack
-        return msgpack.packb([True, self.name, self.metadata])
+        # struct+json: [True, name, metadata]
+        return dict_to_bytes({'ok': True, 'name': self.name, 'metadata': self.metadata.hex()})
 
     def is_dir(self) -> bool:
         return not self.metadata and self.name.endswith('/')
@@ -242,13 +243,11 @@ class MetacacheWriter:
 
     async def write_obj(self, obj: MetaCacheEntry):
         await self.init()
-        import msgpack
-        self.buf += msgpack.packb([True, obj.name, obj.metadata])
+        self.buf += dict_to_bytes({'ok': True, 'name': obj.name, 'metadata': obj.metadata.hex()})
         await self.flush()
 
     async def close(self):
-        import msgpack
-        self.buf += msgpack.packb([False])
+        self.buf += dict_to_bytes({'ok': False})
         await self.flush()
 
 class MetacacheReader:
@@ -286,9 +285,8 @@ class MetacacheReader:
         if self.current is not None:
             n -= 1
             self.current = None
-        import msgpack
+        # 读取一个对象
         while n > 0:
-            # 读取一个对象
             obj = await self.peek()
             if obj is None:
                 return
@@ -298,23 +296,18 @@ class MetacacheReader:
         await self.check_init()
         if self.err:
             raise self.err
-        import msgpack
-        # 读取一个对象
-        # 假设rd有read方法
         # 这里简化为一次性读取
         data = await self.rd.read(4096)
         if not data:
             return None
-        unpacker = msgpack.Unpacker()
-        unpacker.feed(data)
         try:
-            arr = next(unpacker)
-        except StopIteration:
+            arr = bytes_to_dict(data)
+        except Exception:
             return None
-        if not arr or arr[0] is False:
+        if not arr or not arr.get('ok', False):
             return None
-        name = arr[1]
-        metadata = arr[2]
+        name = arr['name']
+        metadata = bytes.fromhex(arr['metadata'])
         entry = MetaCacheEntry(name=name, metadata=metadata, cached=None, reusable=False)
         self.current = entry
         return entry

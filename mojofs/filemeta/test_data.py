@@ -1,5 +1,5 @@
 from mojofs.filemeta.error import Error
-from mojofs.filemeta import *
+from mojofs.filemeta.filemeta import FileMeta, MetaObject, FileMetaVersion, FileMetaShallowVersion, VersionType, MetaDeleteMarker, XL_META_VERSION, ErasureAlgo, ChecksumAlgo
 import uuid
 import datetime
 import struct
@@ -270,7 +270,6 @@ class TestFileMetaData(unittest.TestCase):
 
     def test_empty_xlmeta(self):
         data = create_empty_xlmeta()
-        print("----:",data)
         fm = FileMeta.load(data)
         self.assertEqual(len(fm.versions), 0, "空文件应该没有版本")
 

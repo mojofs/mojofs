@@ -1,9 +1,11 @@
 import io
-import msgpack
+import json
 import uuid
 from mojofs.filemeta.error import Error
 
 from typing import List, Optional, Dict, Union
+
+from mojofs.filemeta.filemeta import dict_to_bytes, bytes_to_dict
 
 
 class InlineData:
@@ -38,57 +40,44 @@ class InlineData:
     def find(self, key: str) -> Optional[bytes]:
         if not self.data or not self.version_ok():
             return None
-
         buf = self.after_version()
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-
         try:
-            data = unpacker.unpack()
+            data = bytes_to_dict(buf)
             if isinstance(data, dict):
                 return data.get(key)
-        except:
+        except Exception:
             pass
-
         return None
 
     def validate(self) -> None:
         if not self.data:
             return
-
         buf = self.after_version()
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-
         try:
-            data = unpacker.unpack()
+            data = bytes_to_dict(buf)
             if not isinstance(data, dict):
                 raise Error("InlineData not a map")
-            
             for key in data.keys():
                 if not key:
                     raise Error("InlineData key empty")
-        except msgpack.exceptions.UnpackException:
-            raise Error("InlineData invalid msgpack")
+        except Exception:
+            raise Error("InlineData invalid json")
 
     def replace(self, key: str, value: bytes) -> None:
         if not self.after_version():
             data = {key: value}
             self.serialize_dict(data)
             return
-
         buf = self.after_version()
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-
         try:
-            data = unpacker.unpack()
+            data = bytes_to_dict(buf)
             if isinstance(data, dict):
                 data[key] = value
                 self.serialize_dict(data)
             else:
-                # 如果不是字典，创建新的
                 data = {key: value}
                 self.serialize_dict(data)
-        except:
-            # 解析失败，创建新的
+        except Exception:
             data = {key: value}
             self.serialize_dict(data)
 
@@ -96,31 +85,24 @@ class InlineData:
         buf = self.after_version()
         if not buf:
             return False
-
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-
         try:
-            data = unpacker.unpack()
+            data = bytes_to_dict(buf)
             if not isinstance(data, dict):
                 return False
-
             found = False
             for key in remove_keys:
                 key_str = str(key)
                 if key_str in data:
                     del data[key_str]
                     found = True
-
             if not found:
                 return False
-
             if not data:
                 self.data = bytearray()
             else:
                 self.serialize_dict(data)
-
             return True
-        except:
+        except Exception:
             return False
 
     def serialize(self, keys: List[str], values: List[bytes]) -> None:
@@ -140,11 +122,8 @@ class InlineData:
         if not data:
             self.data = bytearray()
             return
-
         wr = bytearray()
         wr.append(InlineData.INLINE_DATA_VER)
-        
-        packed = msgpack.packb(data, use_bin_type=True)
+        packed = dict_to_bytes(data)
         wr.extend(packed)
-
         self.data = wr

@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime, timezone
 import uuid
 
-import msgpack
-
+import json
+# import msgpack  # 移除 msgpack
+from mojofs.filemeta import dict_to_bytes, bytes_to_dict
 from mojofs.filemeta.error import Error
 from mojofs.filemeta.fileinfo import FileInfo, FileInfoVersions, RawFileInfo, ErasureInfo, ObjectPartInfo
 from mojofs.filemeta.filemeta_inline import InlineData
@@ -174,75 +175,27 @@ class FileMetaVersionHeader:
         return (self.flags & Flags.UsesDataDir) != 0
 
     def marshal_msg(self) -> bytes:
-        buf = io.BytesIO()
-        
-        # array len 7
-        msgpack.pack(7, buf, use_bin_type=True)
-        
-        # version_id
+        # struct: 16字节uuid, 8字节mod_time(ns), 4字节signature, 1字节version_type, 4字节flags, 4字节ec_n, 4字节ec_m
         vid_bytes = self.version_id.bytes if self.version_id else uuid.UUID(int=0).bytes
-        msgpack.pack(vid_bytes, buf, use_bin_type=True)
-        
-        # mod_time
-        if self.mod_time:
-            timestamp_ns = int(self.mod_time.timestamp() * 1e9)
-        else:
-            timestamp_ns = 0
-        msgpack.pack(timestamp_ns, buf, use_bin_type=True)
-        
-        # signature
-        msgpack.pack(self.signature, buf, use_bin_type=True)
-        
-        # version_type
-        msgpack.pack(self.version_type.to_u8(), buf, use_bin_type=True)
-        
-        # flags
-        msgpack.pack(self.flags, buf, use_bin_type=True)
-        
-        # ec_n
-        msgpack.pack(self.ec_n, buf, use_bin_type=True)
-        
-        # ec_m
-        msgpack.pack(self.ec_m, buf, use_bin_type=True)
-        
-        return buf.getvalue()
+        timestamp_ns = int(self.mod_time.timestamp() * 1e9) if self.mod_time else 0
+        sig = self.signature if self.signature else b'\x00' * 4
+        packed = struct.pack('<16sQ4sBIII', vid_bytes, timestamp_ns, sig, self.version_type.value, self.flags, self.ec_n, self.ec_m)
+        return packed
 
     def unmarshal_msg(self, buf: bytes) -> int:
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-        
-        alen = unpacker.unpack()
-        if alen != 7:
-            raise Error(f"version header array len err need 7 got {alen}")
-        
-        # version_id
-        vid_bytes = unpacker.unpack()
+        # struct: 16字节uuid, 8字节mod_time(ns), 4字节signature, 1字节version_type, 4字节flags, 4字节ec_n, 4字节ec_m
+        if len(buf) < 41:
+            raise Error('version header too short')
+        vid_bytes, timestamp_ns, sig, vtype, flags, ec_n, ec_m = struct.unpack('<16sQ4sBIII', buf[:41])
         vid = uuid.UUID(bytes=vid_bytes)
         self.version_id = None if vid.int == 0 else vid
-        
-        # mod_time
-        timestamp_ns = unpacker.unpack()
-        if timestamp_ns == 0:
-            self.mod_time = None
-        else:
-            self.mod_time = datetime.fromtimestamp(timestamp_ns / 1e9, tz=timezone.utc)
-        
-        # signature
-        self.signature = unpacker.unpack()
-        
-        # version_type
-        typ = unpacker.unpack()
-        self.version_type = VersionType.from_u8(typ)
-        
-        # flags
-        self.flags = unpacker.unpack()
-        
-        # ec_n
-        self.ec_n = unpacker.unpack()
-        
-        # ec_m
-        self.ec_m = unpacker.unpack()
-        
-        return unpacker.tell()
+        self.mod_time = None if timestamp_ns == 0 else datetime.fromtimestamp(timestamp_ns / 1e9, tz=timezone.utc)
+        self.signature = sig
+        self.version_type = VersionType.from_u8(vtype)
+        self.flags = flags
+        self.ec_n = ec_n
+        self.ec_m = ec_m
+        return 41
 
     def inline_data(self) -> bool:
         return (self.flags & Flags.InlineData) != 0
@@ -297,51 +250,39 @@ class MetaObject:
     meta_user: Dict[str, str] = field(default_factory=dict)
 
     def unmarshal_msg(self, buf: bytes) -> int:
-        data = msgpack.unpackb(buf, raw=False)
-        
-        self.version_id = uuid.UUID(bytes=data.get('ID', b'\x00' * 16)) if data.get('ID') else None
-        if self.version_id and self.version_id.int == 0:
-            self.version_id = None
-            
-        self.data_dir = uuid.UUID(bytes=data.get('DDir', b'\x00' * 16)) if data.get('DDir') else None
-        if self.data_dir and self.data_dir.int == 0:
-            self.data_dir = None
-            
-        self.erasure_algorithm = ErasureAlgo(data.get('EcAlgo', 0))
-        self.erasure_m = data.get('EcM', 0)
-        self.erasure_n = data.get('EcN', 0)
-        self.erasure_block_size = data.get('EcBSize', 0)
-        self.erasure_index = data.get('EcIndex', 0)
-        self.erasure_dist = list(data.get('EcDist', []))
-        self.bitrot_checksum_algo = ChecksumAlgo(data.get('CSumAlgo', 0))
-        self.part_numbers = data.get('PartNums', [])
-        self.part_etags = data.get('PartETags', [])
-        self.part_sizes = data.get('PartSizes', [])
-        self.part_actual_sizes = data.get('PartASizes', [])
-        self.part_indices = data.get('PartIdx', [])
-        self.size = data.get('Size', 0)
-        
-        mtime = data.get('MTime')
-        if mtime and mtime != 0:
-            self.mod_time = datetime.fromtimestamp(mtime / 1e9, tz=timezone.utc)
-        else:
-            self.mod_time = None
-            
-        self.meta_sys = data.get('MetaSys', {})
-        self.meta_user = data.get('MetaUsr', {})
-        
+        # 用 json+utf-8 解码
+        d = bytes_to_dict(buf)
+        self.version_id = uuid.UUID(d['ID']) if d.get('ID') else None
+        self.data_dir = uuid.UUID(d['DDir']) if d.get('DDir') else None
+        self.erasure_algorithm = ErasureAlgo(d.get('EcAlgo', 0))
+        self.erasure_m = d.get('EcM', 0)
+        self.erasure_n = d.get('EcN', 0)
+        self.erasure_block_size = d.get('EcBSize', 0)
+        self.erasure_index = d.get('EcIndex', 0)
+        self.erasure_dist = d.get('EcDist', [])
+        self.bitrot_checksum_algo = ChecksumAlgo(d.get('CSumAlgo', 0))
+        self.part_numbers = d.get('PartNums', [])
+        self.part_etags = d.get('PartETags', [])
+        self.part_sizes = d.get('PartSizes', [])
+        self.part_actual_sizes = d.get('PartASizes', [])
+        self.part_indices = d.get('PartIdx', [])
+        self.size = d.get('Size', 0)
+        mtime = d.get('MTime')
+        self.mod_time = datetime.fromtimestamp(mtime / 1e9, tz=timezone.utc) if mtime else None
+        self.meta_sys = d.get('MetaSys', {})
+        self.meta_user = d.get('MetaUsr', {})
         return len(buf)
 
     def marshal_msg(self) -> bytes:
-        data = {
-            'ID': self.version_id.bytes if self.version_id else b'\x00' * 16,
-            'DDir': self.data_dir.bytes if self.data_dir else b'\x00' * 16,
+        d = {
+            'ID': str(self.version_id) if self.version_id else '',
+            'DDir': str(self.data_dir) if self.data_dir else '',
             'EcAlgo': self.erasure_algorithm.value,
             'EcM': self.erasure_m,
             'EcN': self.erasure_n,
             'EcBSize': self.erasure_block_size,
             'EcIndex': self.erasure_index,
-            'EcDist': bytes(self.erasure_dist),
+            'EcDist': self.erasure_dist,
             'CSumAlgo': self.bitrot_checksum_algo.value,
             'PartNums': self.part_numbers,
             'PartETags': self.part_etags,
@@ -353,7 +294,7 @@ class MetaObject:
             'MetaSys': self.meta_sys,
             'MetaUsr': self.meta_user,
         }
-        return msgpack.packb(data, use_bin_type=True)
+        return dict_to_bytes(d)
 
     def into_fileinfo(self, volume: str, path: str, all_parts: bool) -> FileInfo:
         version_id = self.version_id if self.version_id and self.version_id.int != 0 else None
@@ -513,32 +454,22 @@ class MetaDeleteMarker:
         )
 
     def unmarshal_msg(self, buf: bytes) -> int:
-        data = msgpack.unpackb(buf, raw=False)
-        
-        vid_bytes = data.get('ID')
-        if vid_bytes:
-            vid = uuid.UUID(bytes=vid_bytes)
-            self.version_id = None if vid.int == 0 else vid
-        
-        mtime = data.get('MTime')
-        if mtime and mtime != 0:
-            self.mod_time = datetime.fromtimestamp(mtime / 1e9, tz=timezone.utc)
-        else:
-            self.mod_time = None
-        
-        self.meta_sys = data.get('MetaSys', {})
-        
+        d = bytes_to_dict(buf)
+        vid = d.get('ID')
+        self.version_id = uuid.UUID(vid) if vid else None
+        mtime = d.get('MTime')
+        self.mod_time = datetime.fromtimestamp(mtime / 1e9, tz=timezone.utc) if mtime else None
+        self.meta_sys = d.get('MetaSys', {})
         return len(buf)
 
     def marshal_msg(self) -> bytes:
-        data = {
-            'ID': self.version_id.bytes if self.version_id else b'\x00' * 16,
+        d = {
+            'ID': str(self.version_id) if self.version_id else '',
             'MTime': int(self.mod_time.timestamp() * 1e9) if self.mod_time else 0,
         }
         if self.meta_sys:
-            data['MetaSys'] = self.meta_sys
-        
-        return msgpack.packb(data, use_bin_type=True)
+            d['MetaSys'] = self.meta_sys
+        return dict_to_bytes(d)
 
     def get_signature(self) -> bytes:
         # Simple hash implementation
@@ -602,36 +533,34 @@ class FileMetaVersion:
         return None
 
     def unmarshal_msg(self, buf: bytes) -> int:
-        data = msgpack.unpackb(buf, raw=False)
+        d = bytes_to_dict(buf)
         
-        self.version_type = VersionType(data.get('Type', 0))
-        self.write_version = data.get('v', 0)
+        self.version_type = VersionType(d.get('Type', 0))
+        self.write_version = d.get('v', 0)
         
-        if 'V2Obj' in data and data['V2Obj']:
+        if 'V2Obj' in d and d['V2Obj']:
             self.object = MetaObject()
-            self.object.unmarshal_msg(msgpack.packb(data['V2Obj'], use_bin_type=True))
+            self.object.unmarshal_msg(dict_to_bytes(d['V2Obj']))
         
-        if 'DelObj' in data and data['DelObj']:
+        if 'DelObj' in d and d['DelObj']:
             self.delete_marker = MetaDeleteMarker()
-            self.delete_marker.unmarshal_msg(msgpack.packb(data['DelObj'], use_bin_type=True))
+            self.delete_marker.unmarshal_msg(dict_to_bytes(d['DelObj']))
         
         return len(buf)
 
     def marshal_msg(self) -> bytes:
-        data = {
+        d = {
             'Type': self.version_type.value,
             'v': self.write_version
         }
         
         if self.object:
-            obj_data = msgpack.unpackb(self.object.marshal_msg(), raw=False)
-            data['V2Obj'] = obj_data
+            d['V2Obj'] = bytes_to_dict(self.object.marshal_msg())
         
         if self.delete_marker:
-            del_data = msgpack.unpackb(self.delete_marker.marshal_msg(), raw=False)
-            data['DelObj'] = del_data
+            d['DelObj'] = bytes_to_dict(self.delete_marker.marshal_msg())
         
-        return msgpack.packb(data, use_bin_type=True)
+        return dict_to_bytes(d)
 
     def free_version(self) -> bool:
         return (self.version_type == VersionType.Delete and 
@@ -796,8 +725,8 @@ class FileMeta:
         if len(buf) < 5:
             raise Error("insufficient data for header")
         
-        unpacker = msgpack.Unpacker(io.BytesIO(buf[:5]), raw=True)
-        bin_len = unpacker.unpack()
+        unpacker = io.BytesIO(buf[:5])
+        bin_len = struct.unpack('>I', unpacker.read(4))[0]
         
         return (bin_len, buf[5:])
 
@@ -805,77 +734,84 @@ class FileMeta:
         i = len(buf)
         # Check version
         buf, _, _ = self.check_xl2_v1(buf)
-        
         if len(buf) < 5:
             raise Error("insufficient data for size")
-        
-        # Get metadata size
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=True)
-        bin_len = len(unpacker.unpack())
-
+        # 读取元数据长度
+        meta_len = struct.unpack('>I', buf[1:5])[0]
         buf = buf[5:]
-        
-        if len(buf) < bin_len:
+        if len(buf) < meta_len:
             raise Error("insufficient data for metadata")
-        
-        meta = buf[:bin_len]
-        buf = buf[bin_len:]
-        
+        meta = buf[:meta_len]
+        buf = buf[meta_len:]
         if len(buf) < 5:
             raise Error("insufficient data for CRC")
-        
-        # CRC check
-        unpacker = msgpack.Unpacker(io.BytesIO(buf), raw=False)
-        crc = unpacker.unpack()
+        crc = struct.unpack('>I', buf[1:5])[0]
         buf = buf[5:]
-        
-        # Calculate CRC (simplified - should use xxhash)
         meta_crc = hash(meta) & 0xFFFFFFFF
-        
         if crc != meta_crc:
-            # For now, just log warning instead of failing
-            pass
-        
+            pass  # 只警告
         if buf:
             self.data.update(buf)
             self.data.validate()
-        
-        # Parse meta
+        # 解析meta
         if meta:
-            versions_len, _, meta_ver, meta = self.decode_xl_headers(meta)
-            self.meta_ver = meta_ver
+            meta_dict = bytes_to_dict(meta)
+            self.meta_ver = meta_dict.get('meta_ver', XL_META_VERSION)
             self.versions = []
-            cur = io.BytesIO(meta)
-            for _ in range(versions_len):
-                # Read header
-                unpacker = msgpack.Unpacker(cur, raw=True)
-                header_buf = unpacker.unpack()
-                
+            for v in meta_dict.get('versions', []):
                 ver = FileMetaShallowVersion()
-                ver.header.unmarshal_msg(header_buf)
-                
-                # Read meta
-                ver_meta_buf = unpacker.unpack()
-                ver.meta = ver_meta_buf
-                
+                ver.header.unmarshal_msg(bytes.fromhex(v['header']))
+                ver.meta = bytes.fromhex(v['meta'])
                 self.versions.append(ver)
-        
         return i
+
+    def marshal_msg(self) -> bytes:
+        buf = io.BytesIO()
+        # Header
+        buf.write(XL_FILE_HEADER)
+        buf.write(struct.pack('<H', XL_FILE_VERSION_MAJOR))
+        buf.write(struct.pack('<H', XL_FILE_VERSION_MINOR))
+        # 预留长度
+        size_pos = buf.tell()
+        buf.write(b'\x00\x00\x00\x00\x00')
+        offset = buf.tell()
+        # 写meta（json）
+        meta_dict = {
+            'meta_ver': self.meta_ver,
+            'versions': [
+                {'header': v.header.marshal_msg().hex(), 'meta': v.meta.hex()} for v in self.versions
+            ]
+        }
+        meta_bytes = dict_to_bytes(meta_dict)
+        buf.write(meta_bytes)
+        # 更新长度
+        end_pos = buf.tell()
+        data_len = end_pos - offset
+        buf.seek(size_pos + 1)
+        buf.write(struct.pack('>I', data_len))
+        buf.seek(end_pos)
+        # CRC
+        meta_crc = hash(meta_bytes) & 0xFFFFFFFF
+        buf.write(b'\x00')  # 1字节占位
+        buf.write(struct.pack('>I', meta_crc))
+        # 写inline data
+        buf.write(self.data.as_bytes())
+        return buf.getvalue()
 
     @staticmethod
     def decode_xl_headers(buf: bytes) -> Tuple[int, int, int, bytes]:
         cur = io.BytesIO(buf)
-        unpacker = msgpack.Unpacker(cur, raw=False)
+        unpacker = io.BytesIO(buf)
         
-        header_ver = unpacker.unpack()
+        header_ver = struct.unpack('>I', unpacker.read(4))[0]
         if header_ver > XL_HEADER_VERSION:
             raise Error("xl header version invalid")
         
-        meta_ver = unpacker.unpack()
+        meta_ver = struct.unpack('>I', unpacker.read(4))[0]
         if meta_ver > XL_META_VERSION:
             raise Error("xl meta version invalid")
         
-        versions_len = unpacker.unpack()
+        versions_len = struct.unpack('>I', unpacker.read(4))[0]
         
         return (versions_len, header_ver, meta_ver, buf[cur.tell():])
 
@@ -884,9 +820,9 @@ class FileMeta:
         cur = io.BytesIO(buf)
         
         for i in range(versions):
-            unpacker = msgpack.Unpacker(cur, raw=True)
-            header_buf = unpacker.unpack()
-            ver_meta_buf = unpacker.unpack()
+            unpacker = io.BytesIO(cur.read(struct.calcsize('>I')))
+            header_buf = unpacker.read(struct.calcsize('>I'))
+            ver_meta_buf = cur.read(struct.calcsize('>I'))
             
             try:
                 fnc(i, header_buf, ver_meta_buf)
@@ -915,52 +851,6 @@ class FileMeta:
             return is_delete_marker
         except:
             return False
-
-    def marshal_msg(self) -> bytes:
-        buf = io.BytesIO()
-        
-        # Header
-        buf.write(XL_FILE_HEADER)
-        buf.write(struct.pack('<H', XL_FILE_VERSION_MAJOR))
-        buf.write(struct.pack('<H', XL_FILE_VERSION_MINOR))
-        
-        # Size placeholder
-        size_pos = buf.tell()
-        buf.write(b'\xc6\x00\x00\x00\x00')  # bin32 format
-        
-        offset = buf.tell()
-        
-        # Write headers
-        msgpack.pack(XL_HEADER_VERSION, buf)
-        msgpack.pack(XL_META_VERSION, buf)
-        msgpack.pack(len(self.versions), buf)
-        
-        # Write versions
-        for ver in self.versions:
-            hmsg = ver.header.marshal_msg()
-            msgpack.pack(hmsg, buf, use_bin_type=True)
-            msgpack.pack(ver.meta, buf, use_bin_type=True)
-        
-        # Update size
-        end_pos = buf.tell()
-        data_len = end_pos - offset
-        buf.seek(size_pos + 1)
-        buf.write(struct.pack('>I', data_len))
-        buf.seek(end_pos)
-        
-        # Calculate CRC
-        buf.seek(offset)
-        meta_data = buf.read(data_len)
-        crc = hash(meta_data) & 0xFFFFFFFF
-        
-        buf.seek(end_pos)
-        buf.write(b'\xce')  # u32 format
-        buf.write(struct.pack('>I', crc))
-        
-        # Write inline data
-        buf.write(self.data.as_bytes())
-        
-        return buf.getvalue()
 
     def get_idx(self, idx: int) -> FileMetaVersion:
         if idx >= len(self.versions):
@@ -1534,3 +1424,5 @@ async def read_xl_meta_no_data(reader, size: int) -> bytes:
             raise Error("Unknown minor metadata version")
     else:
         raise Error("Unknown major metadata version")
+
+
